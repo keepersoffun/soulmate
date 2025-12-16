@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Souls - Memory Path Game</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const CELL_SIZE = 60;
+        const MEMORIZE_TIME = 3000;
+        const INITIAL_LIVES = 3;
+
+        const TrapConnectGame = () => {
+            const [gameState, setGameState] = useState('intro'); // intro, memorize, playing, won, lost, gameOver
+            const [level, setLevel] = useState(1);
+            const [lives, setLives] = useState(INITIAL_LIVES);
+            const [traps, setTraps] = useState([]);
+            const [lights, setLights] = useState([]);
+            const [path, setPath] = useState([]);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [connectedLights, setConnectedLights] = useState(new Set());
+            const [revealedTraps, setRevealedTraps] = useState(new Set());
+            const [showTraps, setShowTraps] = useState(true);
+            const [countdown, setCountdown] = useState(3);
+            const [heartPosition, setHeartPosition] = useState(null);
+            const [heartCollected, setHeartCollected] = useState(false);
+            const canvasRef = useRef(null);
+            const gridRef = useRef(null);
+            
+            // Progressive grid size based on level - expands every 5 levels
+            const getGridSize = (level) => {
+                const size = 5 + Math.floor(level / 5);
+                return { rows: size, cols: size };
+            };
+            
+            const gridSize = getGridSize(level);
+            
+            // Difficulty label based on grid size
+            const getDifficulty = () => {
+                const total = gridSize.rows * gridSize.cols;
+                if (total <= 25) return "Easy";      // 5×5
+                if (total <= 36) return "Medium";    // 6×6
+                if (total <= 49) return "Hard";      // 7×7
+                return "Expert";                     // 8×8+
+            };
+            
+            // Minimum distance between lights based on difficulty
+            const getMinLightDistance = (level) => {
+                const grid = getGridSize(level);
+                const total = grid.rows * grid.cols;
+                // Easy levels: 3 spaces, Medium and above: 5 spaces
+                return total <= 25 ? 3 : 5;
+            };
+
+            // Generate level
+            useEffect(() => {
+                generateLevel();
+            }, [level]);
+
+            // Memorization timer with countdown
+            useEffect(() => {
+                if (gameState === 'memorize') {
+                    setShowTraps(true);
+                    setCountdown(3);
+                    sounds.countdown(); // Initial beep for "3"
+                    
+                    const countdownInterval = setInterval(() => {
+                        setCountdown(prev => {
+                            if (prev > 1) {
+                                sounds.countdown();
+                                return prev - 1;
+                            }
+                            return prev;
+                        });
+                    }, 1000);
+                    
+                    const timer = setTimeout(() => {
+                        clearInterval(countdownInterval);
+                        setShowTraps(false);
+                        setGameState('playing');
+                        sounds.go();
+                    }, MEMORIZE_TIME);
+                    
+                    return () => {
+                        clearTimeout(timer);
+                        clearInterval(countdownInterval);
+                    };
+                }
+            }, [gameState, level]);
+
+            const generateLevel = () => {
+                // Reset state
+                setPath([]);
+                setConnectedLights(new Set());
+                setRevealedTraps(new Set());
+                setHeartPosition(null);
+                setHeartCollected(false);
+                setGameState(level === 1 ? 'intro' : 'memorize');
+                
+                const currentGridSize = getGridSize(level);
+                const totalCells = currentGridSize.rows * currentGridSize.cols;
+                const isMediumOrAbove = totalCells > 25;
+                
+                // Helper function to calculate Manhattan distance
+                const manhattanDistance = (pos1, pos2) => {
+                    return Math.abs(pos1.row - pos2.row) + Math.abs(pos1.col - pos2.col);
+                };
+
+                // Helper function to check if position is a corner
+                const isCorner = (pos, gridSize) => {
+                    return (pos.row === 0 || pos.row === gridSize.rows - 1) && 
+                           (pos.col === 0 || pos.col === gridSize.cols - 1);
+                };
+
+                // Helper function to get adjacent cells
+                const getAdjacentCells = (pos, gridSize) => {
+                    const adjacent = [];
+                    const directions = [
+                        { row: -1, col: 0 }, // up
+                        { row: 1, col: 0 },  // down
+                        { row: 0, col: -1 }, // left
+                        { row: 0, col: 1 }   // right
+                    ];
+                    
+                    for (const dir of directions) {
+                        const newRow = pos.row + dir.row;
+                        const newCol = pos.col + dir.col;
+                        if (newRow >= 0 && newRow < gridSize.rows && newCol >= 0 && newCol < gridSize.cols) {
+                            adjacent.push({ row: newRow, col: newCol });
+                        }
+                    }
+                    return adjacent;
+                };
+
+                // Helper function to check if corner position has at least one empty adjacent space
+                const hasEmptyAdjacentSpace = (pos, trapPositions, gridSize) => {
+                    if (!isCorner(pos, gridSize)) return true;
+                    
+                    const adjacent = getAdjacentCells(pos, gridSize);
+                    return adjacent.some(adj => 
+                        !trapPositions.some(t => t.row === adj.row && t.col === adj.col)
+                    );
+                };
+
+                // BFS pathfinding to check if path exists between two points
+                const hasValidPath = (start, end, trapPositions, gridSize) => {
+                    const queue = [start];
+                    const visited = new Set([`${start.row},${start.col}`]);
+                    
+                    while (queue.length > 0) {
+                        const current = queue.shift();
+                        
+                        // Check if we reached the end
+                        if (current.row === end.row && current.col === end.col) {
+                            return true;
+                        }
+                        
+                        // Explore adjacent cells
+                        const adjacent = getAdjacentCells(current, gridSize);
+                        for (const next of adjacent) {
+                            const key = `${next.row},${next.col}`;
+                            
+                            // Skip if already visited
+                            if (visited.has(key)) continue;
+                            
+                            // Skip if it's a trap
+                            if (trapPositions.some(t => t.row === next.row && t.col === next.col)) continue;
+                            
+                            visited.add(key);
+                            queue.push(next);
+                        }
+                    }
+                    
+                    return false;
+                };
+
+                // Try to generate a valid level configuration
+                let validLevelFound = false;
+                let levelAttempts = 0;
+                const maxLevelAttempts = 50;
+                
+                let trapPositions = [];
+                let lightPositions = [];
+                
+                while (!validLevelFound && levelAttempts < maxLevelAttempts) {
+                    levelAttempts++;
+                    trapPositions = [];
+                    lightPositions = [];
+                    
+                    // Generate traps (minimum 5, increases with level)
+                    const numTraps = Math.max(5, Math.min(5 + Math.floor(level / 2), Math.floor(totalCells * 0.4)));
+                    
+                    // Helper to check if a position would create a complete row or column of traps
+                    const wouldCreateCompleteRowOrColumn = (pos, existingTraps) => {
+                        const testTraps = [...existingTraps, pos];
+                        
+                        const trapsInRow = testTraps.filter(t => t.row === pos.row).length;
+                        if (trapsInRow === currentGridSize.cols) {
+                            return true;
+                        }
+                        
+                        const trapsInCol = testTraps.filter(t => t.col === pos.col).length;
+                        if (trapsInCol === currentGridSize.rows) {
+                            return true;
+                        }
+                        
+                        return false;
+                    };
+                    
+                    let trapAttempts = 0;
+                    const maxTrapAttempts = 1000;
+                    
+                    while (trapPositions.length < numTraps && trapAttempts < maxTrapAttempts) {
+                        trapAttempts++;
+                        const pos = {
+                            row: Math.floor(Math.random() * currentGridSize.rows),
+                            col: Math.floor(Math.random() * currentGridSize.cols)
+                        };
+                        
+                        if (trapPositions.some(t => t.row === pos.row && t.col === pos.col)) {
+                            continue;
+                        }
+                        
+                        if (wouldCreateCompleteRowOrColumn(pos, trapPositions)) {
+                            continue;
+                        }
+                        
+                        trapPositions.push(pos);
+                    }
+
+                    // Generate lights (always 2 lights) with minimum distance between them
+                    const numLights = 2;
+                    const minLightDistance = getMinLightDistance(level);
+                    let attempts = 0;
+                    const maxAttempts = 1000;
+                    
+                    while (lightPositions.length < numLights && attempts < maxAttempts) {
+                        attempts++;
+                        const pos = {
+                            row: Math.floor(Math.random() * currentGridSize.rows),
+                            col: Math.floor(Math.random() * currentGridSize.cols)
+                        };
+                        
+                        if (trapPositions.some(t => t.row === pos.row && t.col === pos.col)) {
+                            continue;
+                        }
+                        
+                        if (!hasEmptyAdjacentSpace(pos, trapPositions, currentGridSize)) {
+                            continue;
+                        }
+                        
+                        let validPosition = true;
+                        for (const light of lightPositions) {
+                            if (manhattanDistance(pos, light) < minLightDistance) {
+                                validPosition = false;
+                                break;
+                            }
+                        }
+                        
+                        if (validPosition) {
+                            lightPositions.push(pos);
+                        }
+                    }
+                    
+                    // Validate that a path exists between the two lights
+                    if (lightPositions.length === 2) {
+                        if (hasValidPath(lightPositions[0], lightPositions[1], trapPositions, currentGridSize)) {
+                            validLevelFound = true;
+                        }
+                    }
+                }
+                
+                if (!validLevelFound) {
+                    console.warn('Could not generate valid level after', levelAttempts, 'attempts');
+                }
+                
+                setTraps(trapPositions);
+                setLights(lightPositions);
+                
+                // Generate heart powerup if on Medium+ difficulty and player has 1 life
+                if (isMediumOrAbove && lives === 1) {
+                    let heartAttempts = 0;
+                    const maxHeartAttempts = 100;
+                    
+                    while (heartAttempts < maxHeartAttempts) {
+                        heartAttempts++;
+                        const pos = {
+                            row: Math.floor(Math.random() * currentGridSize.rows),
+                            col: Math.floor(Math.random() * currentGridSize.cols)
+                        };
+                        
+                        // Make sure heart is not on trap or light
+                        if (trapPositions.some(t => t.row === pos.row && t.col === pos.col)) continue;
+                        if (lightPositions.some(l => l.row === pos.row && l.col === pos.col)) continue;
+                        
+                        setHeartPosition(pos);
+                        break;
+                    }
+                }
+            };
+
+            const getCellCenter = (row, col) => {
+                return {
+                    x: col * CELL_SIZE + CELL_SIZE / 2,
+                    y: row * CELL_SIZE + CELL_SIZE / 2
+                };
+            };
+
+            const getCellFromPoint = (x, y) => {
+                const rect = gridRef.current.getBoundingClientRect();
+                const relX = x - rect.left;
+                const relY = y - rect.top;
+                const col = Math.floor(relX / CELL_SIZE);
+                const row = Math.floor(relY / CELL_SIZE);
+                if (row >= 0 && row < gridSize.rows && col >= 0 && col < gridSize.cols) {
+                    return { row, col };
+                }
+                return null;
+            };
+
+            const isTrap = (row, col) => {
+                return traps.some(t => t.row === row && t.col === col);
+            };
+
+            const isLight = (row, col) => {
+                return lights.some(l => l.row === row && l.col === col);
+            };
+
+            const handleStart = (e) => {
+                if (gameState !== 'playing') return;
+                
+                const point = e.touches ? e.touches[0] : e;
+                const cell = getCellFromPoint(point.clientX, point.clientY);
+                
+                if (cell && isLight(cell.row, cell.col)) {
+                    setIsDrawing(true);
+                    setPath([cell]);
+                    setHitTrap(null);
+                }
+            };
+
+            const handleMove = (e) => {
+                if (!isDrawing || gameState !== 'playing') return;
+                
+                e.preventDefault();
+                const point = e.touches ? e.touches[0] : e;
+                const cell = getCellFromPoint(point.clientX, point.clientY);
+                
+                if (cell) {
+                    const lastCell = path[path.length - 1];
+                    if (cell.row !== lastCell.row || cell.col !== lastCell.col) {
+                        // Check if adjacent
+                        const rowDiff = Math.abs(cell.row - lastCell.row);
+                        const colDiff = Math.abs(cell.col - lastCell.col);
+                        
+                        if ((rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1)) {
+                            // Check if cell is already in the path (prevent backtracking)
+                            if (path.some(p => p.row === cell.row && p.col === cell.col)) {
+                                return;
+                            }
+                            
+                            // Check for trap
+                            if (isTrap(cell.row, cell.col)) {
+                                sounds.trap();
+                                const trapKey = `${cell.row}-${cell.col}`;
+                                setRevealedTraps(prev => new Set([...prev, trapKey]));
+                                setIsDrawing(false);
+                                setPath([]);
+                                setLives(lives - 1);
+                                
+                                if (lives - 1 <= 0) {
+                                    setGameState('gameOver');
+                                    setTimeout(() => sounds.gameOver(), 100);
+                                }
+                                return;
+                            }
+                            
+                            // Check for heart collection
+                            if (heartPosition && !heartCollected && 
+                                cell.row === heartPosition.row && cell.col === heartPosition.col) {
+                                setHeartCollected(true);
+                                setLives(lives + 1);
+                                sounds.complete(); // Play a positive sound
+                            }
+                            
+                            sounds.draw();
+                            setPath([...path, cell]);
+                        }
+                    }
+                }
+            };
+
+            const handleEnd = () => {
+                if (!isDrawing || gameState !== 'playing') return;
+                
+                setIsDrawing(false);
+                
+                // Validate that a proper path was drawn
+                if (path.length < 2) {
+                    // No actual path drawn, just a tap
+                    setPath([]);
+                    return;
+                }
+                
+                // Check if ended on a light
+                const lastCell = path[path.length - 1];
+                const firstCell = path[0];
+                
+                if (isLight(lastCell.row, lastCell.col)) {
+                    // Check if first and last are different lights
+                    const isDifferentLight = !(firstCell.row === lastCell.row && firstCell.col === lastCell.col);
+                    
+                    if (isDifferentLight && isLight(firstCell.row, firstCell.col)) {
+                        // Valid connection between two different lights
+                        const newConnected = new Set(connectedLights);
+                        
+                        lights.forEach((light, idx) => {
+                            if ((light.row === firstCell.row && light.col === firstCell.col) ||
+                                (light.row === lastCell.row && light.col === lastCell.col)) {
+                                newConnected.add(idx);
+                            }
+                        });
+                        
+                        setConnectedLights(newConnected);
+                        
+                        // Check if all lights connected
+                        if (newConnected.size === lights.length) {
+                            setGameState('won');
+                            setShowTraps(true);
+                            sounds.complete();
+                        }
+                    } else {
+                        // Same light or invalid connection
+                        setPath([]);
+                    }
+                } else {
+                    setPath([]);
+                }
+            };
+
+            const nextLevel = () => {
+                setLevel(level + 1);
+            };
+
+            const retry = () => {
+                generateLevel();
+            };
+
+            const restart = () => {
+                setLevel(1);
+                setLives(INITIAL_LIVES);
+                generateLevel();
+            };
+            
+            const startGame = () => {
+                setGameState('memorize');
+            };
+
+            // Sound effects using Web Audio API
+            const playSound = (frequency, duration, type = 'sine') => {
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.value = frequency;
+                    oscillator.type = type;
+                    
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + duration);
+                } catch (e) {
+                    // Silent fail if audio not supported
+                }
+            };
+            
+            const sounds = {
+                countdown: () => playSound(800, 0.1),
+                go: () => playSound(1200, 0.2),
+                draw: () => playSound(400, 0.05),
+                trap: () => playSound(200, 0.3, 'square'),
+                complete: () => {
+                    playSound(523, 0.15);
+                    setTimeout(() => playSound(659, 0.15), 100);
+                    setTimeout(() => playSound(784, 0.3), 200);
+                },
+                gameOver: () => {
+                    playSound(400, 0.2);
+                    setTimeout(() => playSound(300, 0.2), 150);
+                    setTimeout(() => playSound(200, 0.4), 300);
+                }
+            };
+
+            // Draw path on canvas
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                
+                canvas.width = gridSize.cols * CELL_SIZE;
+                canvas.height = gridSize.rows * CELL_SIZE;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (path.length > 1) {
+                    ctx.strokeStyle = '#a78bfa';
+                    ctx.lineWidth = 8;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    
+                    ctx.beginPath();
+                    const start = getCellCenter(path[0].row, path[0].col);
+                    ctx.moveTo(start.x, start.y);
+                    
+                    for (let i = 1; i < path.length; i++) {
+                        const point = getCellCenter(path[i].row, path[i].col);
+                        ctx.lineTo(point.x, point.y);
+                    }
+                    ctx.stroke();
+                }
+            }, [path, gridSize]);
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-8">
+                    <div className="text-center">
+                        <h1 className="text-4xl font-bold text-white mb-2">Connect Souls</h1>
+                        <div className="flex justify-center gap-8 mb-4 text-white">
+                            <div className="text-xl">Level: <span className="font-bold text-purple-300">{level}</span></div>
+                            <div className="text-xl"><span className="font-bold text-blue-300">{getDifficulty()}</span></div>
+                            <div className="text-xl">Lives: <span className="font-bold text-red-300">{'❤️'.repeat(lives)}</span></div>
+                        </div>
+                        
+                        {gameState === 'intro' && (
+                            <div className="mb-4">
+                                <div className="text-yellow-300 text-lg mb-6 font-semibold">
+                                    Memorize where the traps are
+                                </div>
+                                <button
+                                    onClick={startGame}
+                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-8 rounded-lg text-xl"
+                                >
+                                    Play
+                                </button>
+                            </div>
+                        )}
+                        
+                        {gameState === 'memorize' && (
+                            <div className="text-yellow-300 text-6xl mb-4 font-bold animate-pulse">
+                                {countdown > 0 ? countdown : 'GO!'}
+                            </div>
+                        )}
+                        
+                        {gameState === 'playing' && (
+                            <div className="text-green-300 text-lg mb-4 font-semibold">
+                                Connect the souls without hitting traps!
+                            </div>
+                        )}
+                        
+                        {gameState === 'won' && (
+                            <div className="mb-4">
+                                <div className="text-green-400 text-2xl font-bold mb-2">Level Complete! 🎉</div>
+                                <button
+                                    onClick={nextLevel}
+                                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg"
+                                >
+                                    Next Level
+                                </button>
+                            </div>
+                        )}
+                        
+                        {gameState === 'gameOver' && (
+                            <div className="mb-4">
+                                <div className="text-red-400 text-2xl font-bold mb-2">Game Over!</div>
+                                <div className="text-white mb-4">You reached Level {level}</div>
+                                <button
+                                    onClick={restart}
+                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded-lg"
+                                >
+                                    Play Again
+                                </button>
+                            </div>
+                        )}
+                        
+                        <div className="relative inline-block">
+                            <div
+                                ref={gridRef}
+                                className="relative bg-slate-800 border-4 border-purple-500 rounded-lg overflow-hidden"
+                                style={{ width: gridSize.cols * CELL_SIZE, height: gridSize.rows * CELL_SIZE }}
+                                onMouseDown={handleStart}
+                                onMouseMove={handleMove}
+                                onMouseUp={handleEnd}
+                                onMouseLeave={handleEnd}
+                                onTouchStart={handleStart}
+                                onTouchMove={handleMove}
+                                onTouchEnd={handleEnd}
+                            >
+                                {/* Grid cells */}
+                                {Array.from({ length: gridSize.rows }).map((_, row) =>
+                                    Array.from({ length: gridSize.cols }).map((_, col) => (
+                                        <div
+                                            key={`${row}-${col}`}
+                                            className="absolute border border-slate-700"
+                                            style={{
+                                                left: col * CELL_SIZE,
+                                                top: row * CELL_SIZE,
+                                                width: CELL_SIZE,
+                                                height: CELL_SIZE
+                                            }}
+                                        />
+                                    ))
+                                )}
+                                
+                                {/* Traps */}
+                                {traps.map((trap, idx) => {
+                                    const trapKey = `${trap.row}-${trap.col}`;
+                                    const shouldShow = showTraps || revealedTraps.has(trapKey) || gameState === 'gameOver' || gameState === 'intro';
+                                    const shouldGlow = gameState === 'gameOver';
+                                    
+                                    return shouldShow && (
+                                        <div
+                                            key={`trap-${idx}`}
+                                            className={`absolute flex items-center justify-center text-3xl font-bold text-red-500 ${
+                                                shouldGlow ? 'animate-pulse' : ''
+                                            }`}
+                                            style={{
+                                                left: trap.col * CELL_SIZE,
+                                                top: trap.row * CELL_SIZE,
+                                                width: CELL_SIZE,
+                                                height: CELL_SIZE,
+                                                filter: shouldGlow ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.8))' : 'none'
+                                            }}
+                                        >
+                                            ✕
+                                        </div>
+                                    );
+                                })}
+                                
+                                {/* Souls */}
+                                {(gameState !== 'memorize' && gameState !== 'intro') && lights.map((light, idx) => (
+                                    <div
+                                        key={`light-${idx}`}
+                                        className={`absolute flex items-center justify-center rounded-full transition-all ${
+                                            connectedLights.has(idx) 
+                                                ? 'bg-green-400 shadow-lg shadow-green-400/50' 
+                                                : 'bg-white shadow-lg shadow-white/50'
+                                        }`}
+                                        style={{
+                                            left: light.col * CELL_SIZE + 10,
+                                            top: light.row * CELL_SIZE + 10,
+                                            width: CELL_SIZE - 20,
+                                            height: CELL_SIZE - 20
+                                        }}
+                                    />
+                                ))}
+                                
+                                {/* Heart Powerup */}
+                                {heartPosition && !heartCollected && gameState === 'playing' && (
+                                    <div
+                                        className="absolute flex items-center justify-center text-4xl animate-pulse"
+                                        style={{
+                                            left: heartPosition.col * CELL_SIZE,
+                                            top: heartPosition.row * CELL_SIZE,
+                                            width: CELL_SIZE,
+                                            height: CELL_SIZE,
+                                            filter: 'drop-shadow(0 0 10px rgba(239, 68, 68, 0.6))'
+                                        }}
+                                    >
+                                        ❤️
+                                    </div>
+                                )}
+                                
+                                {/* Canvas for path drawing */}
+                                <canvas
+                                    ref={canvasRef}
+                                    width={gridSize.cols * CELL_SIZE}
+                                    height={gridSize.rows * CELL_SIZE}
+                                    className="absolute top-0 left-0 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+                        
+                        {gameState !== 'intro' && (
+                            <div className="mt-6 text-white text-sm max-w-md mx-auto">
+                                <p className="mb-2">👻 Tap a soul and drag to connect their mate</p>
+                                <p>❌ Avoid the hidden traps you memorized!</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<TrapConnectGame />, document.getElementById('root'));
+    </script>
+</body>
+</html>
