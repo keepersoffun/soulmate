@@ -18,17 +18,50 @@
             position: fixed;
             touch-action: none;
             -webkit-overflow-scrolling: touch;
+            overscroll-behavior: none;
         }
         #root {
             width: 100%;
             height: 100%;
-            overflow: auto;
-            -webkit-overflow-scrolling: touch;
+            overflow: hidden;
+            position: fixed;
+            top: 0;
+            left: 0;
+            touch-action: none;
+            overscroll-behavior: none;
         }
         * {
             -webkit-tap-highlight-color: transparent;
+            touch-action: none;
+            overscroll-behavior: none;
+        }
+        /* Prevent pull-to-refresh */
+        body {
+            overscroll-behavior-y: contain;
         }
     </style>
+    <script>
+        // Prevent all scrolling on the document
+        document.addEventListener('touchmove', function(e) {
+            e.preventDefault();
+        }, { passive: false });
+        
+        // Prevent pull-to-refresh
+        let lastTouchY = 0;
+        document.addEventListener('touchstart', function(e) {
+            lastTouchY = e.touches[0].clientY;
+        }, { passive: false });
+        
+        document.addEventListener('touchmove', function(e) {
+            const touchY = e.touches[0].clientY;
+            const touchYDelta = touchY - lastTouchY;
+            lastTouchY = touchY;
+            
+            if (window.scrollY === 0 && touchYDelta > 0) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+    </script>
 </head>
 <body>
     <div id="root"></div>
@@ -556,23 +589,32 @@
             }, [path, gridSize]);
 
             return (
-                <div className="min-h-screen max-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-2 overflow-hidden" style={{ touchAction: 'none' }}>
-                    <div className="text-center max-w-full">
-                        <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">Connect Souls</h1>
-                        <div className="flex justify-center gap-4 sm:gap-8 mb-2 sm:mb-4 text-white text-sm sm:text-xl">
+                <div className="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex flex-col items-center justify-center" 
+                     style={{ 
+                         width: '100vw', 
+                         height: '100vh', 
+                         touchAction: 'none',
+                         overflow: 'hidden',
+                         position: 'fixed',
+                         top: 0,
+                         left: 0
+                     }}>
+                    <div className="text-center max-w-full flex flex-col items-center justify-center" style={{ maxHeight: '100vh' }}>
+                        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-1">Connect Souls</h1>
+                        <div className="flex justify-center gap-3 sm:gap-8 mb-1 sm:mb-2 text-white text-xs sm:text-base md:text-xl">
                             <div>Level: <span className="font-bold text-purple-300">{level}</span></div>
                             <div><span className="font-bold text-blue-300">{getDifficulty()}</span></div>
                             <div>Lives: <span className="font-bold text-red-300">{'❤️'.repeat(lives)}</span></div>
                         </div>
                         
                         {gameState === 'intro' && (
-                            <div className="mb-2 sm:mb-4 px-4">
-                                <div className="text-yellow-300 text-sm sm:text-lg mb-4 sm:mb-6 font-semibold">
+                            <div className="mb-1 sm:mb-2 px-2">
+                                <div className="text-yellow-300 text-sm sm:text-base md:text-lg mb-2 sm:mb-4 font-semibold">
                                     Memorize where the traps are
                                 </div>
                                 <button
                                     onClick={startGame}
-                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 sm:py-3 sm:px-8 rounded-lg text-lg sm:text-xl"
+                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 sm:py-3 sm:px-8 rounded-lg text-base sm:text-lg md:text-xl"
                                 >
                                     Play
                                 </button>
@@ -580,23 +622,23 @@
                         )}
                         
                         {gameState === 'memorize' && (
-                            <div className="text-yellow-300 text-4xl sm:text-6xl mb-2 sm:mb-4 font-bold animate-pulse">
+                            <div className="text-yellow-300 text-3xl sm:text-5xl md:text-6xl mb-1 sm:mb-2 font-bold animate-pulse">
                                 {countdown > 0 ? countdown : 'GO!'}
                             </div>
                         )}
                         
                         {gameState === 'playing' && (
-                            <div className="text-green-300 text-sm sm:text-lg mb-2 sm:mb-4 font-semibold px-2">
+                            <div className="text-green-300 text-xs sm:text-sm md:text-base mb-1 sm:mb-2 font-semibold px-2">
                                 Connect the souls without hitting traps!
                             </div>
                         )}
                         
                         {gameState === 'won' && (
-                            <div className="mb-2 sm:mb-4 px-4">
-                                <div className="text-green-400 text-xl sm:text-2xl font-bold mb-2">Level Complete! 🎉</div>
+                            <div className="mb-1 sm:mb-2 px-2">
+                                <div className="text-green-400 text-base sm:text-xl md:text-2xl font-bold mb-2">Level Complete! 🎉</div>
                                 <button
                                     onClick={nextLevel}
-                                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg"
+                                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg text-sm sm:text-base"
                                 >
                                     Next Level
                                 </button>
@@ -604,12 +646,12 @@
                         )}
                         
                         {gameState === 'gameOver' && (
-                            <div className="mb-2 sm:mb-4 px-4">
-                                <div className="text-red-400 text-xl sm:text-2xl font-bold mb-2">Game Over!</div>
-                                <div className="text-white mb-4">You reached Level {level}</div>
+                            <div className="mb-1 sm:mb-2 px-2">
+                                <div className="text-red-400 text-base sm:text-xl md:text-2xl font-bold mb-1">Game Over!</div>
+                                <div className="text-white text-sm sm:text-base mb-2">You reached Level {level}</div>
                                 <button
                                     onClick={restart}
-                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded-lg"
+                                    className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded-lg text-sm sm:text-base"
                                 >
                                     Play Again
                                 </button>
@@ -623,8 +665,8 @@
                                 style={{ 
                                     width: gridSize.cols * CELL_SIZE, 
                                     height: gridSize.rows * CELL_SIZE,
-                                    maxWidth: '90vw',
-                                    maxHeight: '60vh',
+                                    maxWidth: '95vw',
+                                    maxHeight: '55vh',
                                     touchAction: 'none'
                                 }}
                                 onMouseDown={handleStart}
@@ -721,8 +763,8 @@
                         </div>
                         
                         {gameState !== 'intro' && (
-                            <div className="mt-4 text-white text-xs sm:text-sm max-w-md mx-auto px-2">
-                                <p className="mb-2">👻 Tap a soul and drag to connect their mate</p>
+                            <div className="mt-2 text-white text-xs sm:text-sm max-w-md mx-auto px-2">
+                                <p className="mb-1">👻 Tap a soul and drag to connect their mate</p>
                                 <p>❌ Avoid the hidden traps you memorized!</p>
                             </div>
                         )}
