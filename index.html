@@ -69,7 +69,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        const CELL_SIZE = 60;
         const MEMORIZE_TIME = 3000;
         const INITIAL_LIVES = 3;
 
@@ -97,6 +96,24 @@
             };
             
             const gridSize = getGridSize(level);
+            
+            // Dynamic cell size that scales down for larger grids
+            const getCellSize = () => {
+                const baseSize = 60;
+                const maxGridWidth = window.innerWidth * 0.95;
+                const maxGridHeight = window.innerHeight * 0.55;
+                
+                // Calculate cell size based on grid dimensions
+                const cellSizeByWidth = Math.floor(maxGridWidth / gridSize.cols);
+                const cellSizeByHeight = Math.floor(maxGridHeight / gridSize.rows);
+                
+                // Use the smaller of the two to ensure it fits both dimensions
+                const dynamicSize = Math.min(cellSizeByWidth, cellSizeByHeight, baseSize);
+                
+                return Math.max(dynamicSize, 30); // Minimum 30px cells
+            };
+            
+            const CELL_SIZE = getCellSize();
             
             // Difficulty label based on grid size
             const getDifficulty = () => {
@@ -572,7 +589,7 @@
                 
                 if (path.length > 1) {
                     ctx.strokeStyle = '#a78bfa';
-                    ctx.lineWidth = 8;
+                    ctx.lineWidth = Math.max(Math.floor(CELL_SIZE * 0.13), 4);
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
                     
@@ -665,8 +682,6 @@
                                 style={{ 
                                     width: gridSize.cols * CELL_SIZE, 
                                     height: gridSize.rows * CELL_SIZE,
-                                    maxWidth: '95vw',
-                                    maxHeight: '55vh',
                                     touchAction: 'none'
                                 }}
                                 onMouseDown={handleStart}
@@ -698,11 +713,12 @@
                                     const trapKey = `${trap.row}-${trap.col}`;
                                     const shouldShow = showTraps || revealedTraps.has(trapKey) || gameState === 'gameOver' || gameState === 'intro';
                                     const shouldGlow = gameState === 'gameOver';
+                                    const trapFontSize = Math.max(Math.floor(CELL_SIZE * 0.5), 18);
                                     
                                     return shouldShow && (
                                         <div
                                             key={`trap-${idx}`}
-                                            className={`absolute flex items-center justify-center text-3xl font-bold text-red-500 ${
+                                            className={`absolute flex items-center justify-center font-bold text-red-500 ${
                                                 shouldGlow ? 'animate-pulse' : ''
                                             }`}
                                             style={{
@@ -710,6 +726,7 @@
                                                 top: trap.row * CELL_SIZE,
                                                 width: CELL_SIZE,
                                                 height: CELL_SIZE,
+                                                fontSize: `${trapFontSize}px`,
                                                 filter: shouldGlow ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.8))' : 'none'
                                             }}
                                         >
@@ -719,32 +736,38 @@
                                 })}
                                 
                                 {/* Souls */}
-                                {(gameState !== 'memorize' && gameState !== 'intro') && lights.map((light, idx) => (
-                                    <div
-                                        key={`light-${idx}`}
-                                        className={`absolute flex items-center justify-center rounded-full transition-all ${
-                                            connectedLights.has(idx) 
-                                                ? 'bg-green-400 shadow-lg shadow-green-400/50' 
-                                                : 'bg-white shadow-lg shadow-white/50'
-                                        }`}
-                                        style={{
-                                            left: light.col * CELL_SIZE + 10,
-                                            top: light.row * CELL_SIZE + 10,
-                                            width: CELL_SIZE - 20,
-                                            height: CELL_SIZE - 20
-                                        }}
-                                    />
-                                ))}
+                                {(gameState !== 'memorize' && gameState !== 'intro') && lights.map((light, idx) => {
+                                    const soulPadding = Math.max(Math.floor(CELL_SIZE * 0.15), 8);
+                                    const soulSize = CELL_SIZE - (soulPadding * 2);
+                                    
+                                    return (
+                                        <div
+                                            key={`light-${idx}`}
+                                            className={`absolute flex items-center justify-center rounded-full transition-all ${
+                                                connectedLights.has(idx) 
+                                                    ? 'bg-green-400 shadow-lg shadow-green-400/50' 
+                                                    : 'bg-white shadow-lg shadow-white/50'
+                                            }`}
+                                            style={{
+                                                left: light.col * CELL_SIZE + soulPadding,
+                                                top: light.row * CELL_SIZE + soulPadding,
+                                                width: soulSize,
+                                                height: soulSize
+                                            }}
+                                        />
+                                    );
+                                })}
                                 
                                 {/* Heart Powerup */}
                                 {heartPosition && !heartCollected && gameState === 'playing' && (
                                     <div
-                                        className="absolute flex items-center justify-center text-4xl animate-pulse"
+                                        className="absolute flex items-center justify-center animate-pulse"
                                         style={{
                                             left: heartPosition.col * CELL_SIZE,
                                             top: heartPosition.row * CELL_SIZE,
                                             width: CELL_SIZE,
                                             height: CELL_SIZE,
+                                            fontSize: `${Math.max(Math.floor(CELL_SIZE * 0.65), 24)}px`,
                                             filter: 'drop-shadow(0 0 10px rgba(239, 68, 68, 0.6))'
                                         }}
                                     >
